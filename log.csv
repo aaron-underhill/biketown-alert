@@ -1,3 +1,4 @@
 checked_at,shift_start,nearest_walk_minutes,nearest_walk_meters,nearest_source,ebikes_within_threshold,status,notified
 2026-10-21T13:16:51-07:00,,3.6,292,station,0,short,test
 2026-10-21T13:27:51-07:00,,3.6,292,station,0,short,test
+2026-10-21T13:41:54-07:00,,3.6,292,station,0,short,test
