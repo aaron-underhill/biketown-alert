@@ -17,7 +17,7 @@ flowchart LR
     F --> G[(Append to log.csv<br/>on data branch)]
 ```
 
-1. **Schedule.** A GitHub Actions workflow runs every 5 minutes, but the script exits immediately unless it's inside the check window before a shift (for example, from 45 minutes before I leave until I leave).
+1. **Schedule.** A GitHub Actions workflow runs every 5 minutes, but the script exits immediately unless it's inside the check window before a shift: from an hour before the shift starts until I leave, 10 minutes before it.
 2. **Live data.** Biketown publishes real-time availability through [GBFS](https://github.com/MobilityData/gbfs), the open bikeshare data standard. Free-floating bikes come with their own coordinates; bikes docked at stations are matched to station locations.
 3. **Filtering.** Reserved bikes, disabled bikes, and scooters are skipped.
 4. **Walking time.** Straight-line distance (haversine formula) times a 1.3 detour factor for city streets, at a walking pace of 80 m per minute.
@@ -52,7 +52,7 @@ The repo is public, but nothing personal is in it:
    |---|---|---|
    | `THRESHOLD_MINUTES` | `3` | Alert when the nearest e-bike is a longer walk than this |
    | `COMMUTE_MINUTES` | `10` | How long before a shift starts I leave home |
-   | `LEAD_MINUTES` | `45` | How long before leaving the checks begin |
+   | `LEAD_MINUTES` | `50` | How long before leaving the checks begin |
 
 5. On the **Actions** tab, open **Check bikes** and click **Run workflow**. A manual run skips the schedule and always sends a test notification.
 
