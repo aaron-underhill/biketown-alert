@@ -29,7 +29,7 @@ flowchart LR
 The repo is public, but nothing personal is in it:
 
 - Home coordinates, the ntfy topic, and my shift schedule are stored as GitHub Actions secrets.
-- The log records walking time and distance, never coordinates or station names.
+- The log records walking time and distance, never coordinates or station names. Its timestamps do show roughly when checks run, and so roughly when my shifts are.
 
 ## Setup
 
@@ -51,7 +51,7 @@ The repo is public, but nothing personal is in it:
    | Variable | Default | Meaning |
    |---|---|---|
    | `THRESHOLD_MINUTES` | `3` | Alert when the nearest e-bike is a longer walk than this |
-   | `COMMUTE_MINUTES` | `20` | How long before a shift starts I leave home |
+   | `COMMUTE_MINUTES` | `10` | How long before a shift starts I leave home |
    | `LEAD_MINUTES` | `45` | How long before leaving the checks begin |
 
 5. On the **Actions** tab, open **Check bikes** and click **Run workflow**. A manual run skips the schedule and always sends a test notification.
@@ -87,5 +87,5 @@ tests/        unit tests with hand-made feeds shaped like the real ones
 ## Ideas
 
 - Analyze the log: which days and times bikes run short, and whether it's getting better or worse.
-- Pull shifts straight from a calendar instead of a list.
+- Pull shifts straight from Google Calendar instead of a list.
 - Use real walking routes instead of a detour estimate.

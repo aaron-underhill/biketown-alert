@@ -68,7 +68,7 @@ def load_config() -> Config:
         home_lat=float(_required("HOME_LAT")),
         home_lon=float(_required("HOME_LON")),
         threshold_minutes=float(_optional("THRESHOLD_MINUTES", "3")),
-        commute_minutes=int(_optional("COMMUTE_MINUTES", "20")),
+        commute_minutes=int(_optional("COMMUTE_MINUTES", "10")),
         lead_minutes=int(_optional("LEAD_MINUTES", "45")),
         walk_meters_per_minute=float(_optional("WALK_METERS_PER_MINUTE", "80")),
         detour_factor=float(_optional("DETOUR_FACTOR", "1.3")),
