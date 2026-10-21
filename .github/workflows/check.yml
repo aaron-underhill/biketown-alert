@@ -1,0 +1,69 @@
+name: Check bikes
+
+on:
+  schedule:
+    # Every 5 minutes. The script exits right away outside pre-shift windows.
+    # GitHub may start scheduled runs a few minutes late during busy periods.
+    - cron: "*/5 * * * *"
+
+  # "Run workflow" button on the Actions tab. Sends a test notification.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Never let two checks write the log at the same time.
+concurrency:
+  group: bike-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The log and alert state live on a separate "data" branch so the
+      # main branch history stays clean.
+      - name: Check out data branch
+        run: |
+          if git ls-remote --exit-code --heads origin data > /dev/null; then
+            git fetch --depth=1 origin data
+            git worktree add -B data data FETCH_HEAD
+          else
+            git worktree add --detach data
+            cd data
+            git checkout --orphan data
+            git rm -rfq .
+          fi
+
+      - name: Check bikes
+        env:
+          HOME_LAT: ${{ secrets.HOME_LAT }}
+          HOME_LON: ${{ secrets.HOME_LON }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          SHIFTS: ${{ secrets.SHIFTS }}
+          THRESHOLD_MINUTES: ${{ vars.THRESHOLD_MINUTES }}
+          COMMUTE_MINUTES: ${{ vars.COMMUTE_MINUTES }}
+          LEAD_MINUTES: ${{ vars.LEAD_MINUTES }}
+          FORCE_CHECK: ${{ github.event_name == 'workflow_dispatch' }}
+        run: python -m bikealert.main --data-dir data
+
+      - name: Save log
+        run: |
+          cd data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing new to save."
+          else
+            git commit -qm "Log bike check"
+            git push -q origin data
+          fi
