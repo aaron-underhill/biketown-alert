@@ -2,8 +2,10 @@
 One check: runs every few minutes on a schedule.
 
 1. Exit quietly unless we are inside a pre-shift check window.
-2. Find the nearest available e-bike and estimate the walk to it.
-3. Notify when bikes become scarce, and again when they come back.
+2. Count the available e-bikes within a short walk and sort the result into
+   a category: none, few, or plenty.
+3. Notify with the category at the first check of each window, then again
+   only when the category changes.
 4. Append the result to a CSV log for later analysis.
 
 Usage:
@@ -21,6 +23,12 @@ from bikealert.config import TIMEZONE, Config, load_config
 from bikealert.shifts import active_window
 
 
+NONE = "none"
+FEW = "few"
+PLENTY = "plenty"
+
+CATEGORIES = (NONE, FEW, PLENTY)
+
 LOG_COLUMNS = [
     "checked_at",
     "shift_start",
@@ -32,7 +40,7 @@ LOG_COLUMNS = [
     "notified",
 ]
 
-# Keep remembered alert states for this long.
+# Keep remembered categories for this long.
 STATE_RETENTION = timedelta(days=2)
 
 
@@ -44,20 +52,30 @@ def walk_minutes(cfg: Config, straight_line_meters: float) -> float:
     return walk_meters(cfg, straight_line_meters) / cfg.walk_meters_per_minute
 
 
-def decide(previous_status: str | None, short: bool) -> str | None:
+def categorize(nearby: int, plenty_min: int) -> str:
+    if nearby == 0:
+        return NONE
+
+    if nearby < plenty_min:
+        return FEW
+
+    return PLENTY
+
+
+def decide(previous: str | None, current: str) -> str | None:
     """
     Which notification to send, if any.
 
-    Alerting on every check would buzz your phone every five minutes, so
-    only changes are announced: once when bikes become scarce, and once if
-    they come back before you leave.
+    "initial" at the first check of a window, so there is always a heads-up.
+    "change" whenever the category moves, in either direction.
+    Nothing while the category stays the same.
     """
 
-    if short and previous_status != "short":
-        return "short"
+    if previous not in CATEGORIES:
+        return "initial"
 
-    if not short and previous_status == "short":
-        return "recovered"
+    if previous != current:
+        return "change"
 
     return None
 
@@ -112,34 +130,30 @@ def run(cfg: Config, data_dir: Path, now: datetime | None = None, fetch=None) ->
         minutes = None
         meters = None
         source = ""
-        short = True
     else:
         bike, straight = found
         minutes = walk_minutes(cfg, straight)
         meters = walk_meters(cfg, straight)
         source = "street" if bike.source == "street" else "station"
-        short = minutes > cfg.threshold_minutes
 
-    threshold_straight_line = (
-        cfg.threshold_minutes * cfg.walk_meters_per_minute / cfg.detour_factor
-    )
-    nearby = bikes.count_within(
-        available, cfg.home_lat, cfg.home_lon, threshold_straight_line
-    )
+    radius = cfg.threshold_minutes * cfg.walk_meters_per_minute / cfg.detour_factor
+    nearby = bikes.count_within(available, cfg.home_lat, cfg.home_lon, radius)
+
+    category = categorize(nearby, cfg.plenty_min)
 
     state_path = data_dir / "state.json"
     state = load_state(state_path)
 
-    kind = decide(state.get(shift_key), short)
+    kind = decide(state.get(shift_key), category)
 
-    # A manual test run always sends something, so you can confirm it works.
+    # A manual test run always reports, so you can confirm it works.
     if cfg.force and window is None:
         kind = "test"
 
     if kind:
-        send_notification(cfg, kind, found, minutes, nearby, window)
+        send_notification(cfg, kind, category, nearby, found, minutes, window)
 
-    state[shift_key] = "short" if short else "ok"
+    state[shift_key] = category
     save_state(state_path, state, now)
 
     append_log(
@@ -151,64 +165,76 @@ def run(cfg: Config, data_dir: Path, now: datetime | None = None, fetch=None) ->
             "nearest_walk_meters": "" if meters is None else f"{meters:.0f}",
             "nearest_source": source,
             "ebikes_within_threshold": nearby,
-            "status": "short" if short else "ok",
+            "status": category,
             "notified": kind or "",
         },
     )
 
-    summary = "no e-bikes found" if minutes is None else f"nearest {minutes:.1f} min walk"
-    print(f"Status: {'short' if short else 'ok'} ({summary}). Notification: {kind or 'none'}.")
+    nearest_text = "none found" if minutes is None else f"nearest {minutes:.1f} min walk"
+    print(f"Category: {category} ({nearby} nearby, {nearest_text}). Notification: {kind or 'none'}.")
 
     return kind or "checked"
 
 
-def send_notification(cfg, kind, found, minutes, nearby, window) -> None:
+def describe(cfg: Config, category: str, nearby: int, minutes: float | None) -> tuple[str, str]:
+    """Notification title and body for a category."""
+
+    walk = f"{cfg.threshold_minutes:g} min walk"
+    plural = "e-bike" if nearby == 1 else "e-bikes"
+
+    if category == PLENTY:
+        return (
+            "Plenty of bikes available",
+            f"{nearby} {plural} within a {walk}.",
+        )
+
+    if category == FEW:
+        return (
+            f"Only {nearby} bike{'s' if nearby != 1 else ''} nearby",
+            f"{nearby} {plural} within a {walk}. Nearest is about "
+            f"{minutes:.0f} min away.",
+        )
+
+    if minutes is None:
+        detail = "No e-bikes are available anywhere."
+    else:
+        detail = f"Nearest e-bike is about a {minutes:.0f} min walk."
+
+    return ("No bikes available", f"None within a {walk}. {detail} Consider leaving early.")
+
+
+def send_notification(cfg, kind, category, nearby, found, minutes, window) -> None:
+    title, body = describe(cfg, category, nearby, minutes)
+
+    if kind == "change":
+        title = f"Update: {title[0].lower()}{title[1:]}"
+
+    elif kind == "test":
+        title = f"Test check: {title[0].lower()}{title[1:]}"
+
+    if window is not None and category != PLENTY:
+        body += f" Planned leave time: {window.leave_at:%-I:%M %p}."
+
     click = ""
 
     if found is not None:
         bike, _ = found
         click = notify.walking_directions_url(bike.lat, bike.lon)
 
-    leave_note = ""
+    # Only "none" is urgent. ntfy's "low" can hide the banner entirely, so
+    # the good news stays at normal priority.
+    priority = "high" if category == NONE else "default"
+    tags = {NONE: "red_circle", FEW: "yellow_circle", PLENTY: "green_circle"}[category]
 
-    if window is not None:
-        leave_note = f" You planned to leave at {window.leave_at:%-I:%M %p}."
-
-    if minutes is None:
-        distance_text = "No e-bikes are available anywhere nearby."
-    else:
-        distance_text = f"Nearest e-bike is about a {minutes:.0f} min walk away."
-
-    if kind == "short":
-        notify.send(
-            cfg.ntfy_server,
-            cfg.ntfy_topic,
-            f"{distance_text}{leave_note} Consider heading out early.",
-            title="Biketown: bikes are far today",
-            priority="high",
-            tags="bike,warning",
-            click_url=click,
-        )
-
-    elif kind == "recovered":
-        notify.send(
-            cfg.ntfy_server,
-            cfg.ntfy_topic,
-            f"{distance_text} {nearby} within your usual range.",
-            title="Biketown: bikes are back",
-            tags="bike,white_check_mark",
-            click_url=click,
-        )
-
-    elif kind == "test":
-        notify.send(
-            cfg.ntfy_server,
-            cfg.ntfy_topic,
-            f"{distance_text} {nearby} e-bike(s) within {cfg.threshold_minutes:g} min.",
-            title="Biketown alert: test check",
-            tags="bike",
-            click_url=click,
-        )
+    notify.send(
+        cfg.ntfy_server,
+        cfg.ntfy_topic,
+        body,
+        title=title,
+        priority=priority,
+        tags=f"bike,{tags}",
+        click_url=click,
+    )
 
 
 def main() -> None:

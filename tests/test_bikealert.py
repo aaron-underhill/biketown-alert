@@ -52,6 +52,7 @@ def make_config(**overrides) -> Config:
         home_lat=HOME[0],
         home_lon=HOME[1],
         threshold_minutes=3,
+        plenty_min=4,
         commute_minutes=20,
         lead_minutes=45,
         walk_meters_per_minute=80,
@@ -152,28 +153,53 @@ class ShiftWindowTests(unittest.TestCase):
             shifts.parse_shifts("sometime tomorrow")
 
 
+class CategoryTests(unittest.TestCase):
+    def test_boundaries(self):
+        self.assertEqual(main.categorize(0, 4), "none")
+        self.assertEqual(main.categorize(1, 4), "few")
+        self.assertEqual(main.categorize(3, 4), "few")
+        self.assertEqual(main.categorize(4, 4), "plenty")
+        self.assertEqual(main.categorize(9, 4), "plenty")
+
+    def test_station_bikes_all_count(self):
+        station = bikes.Bike(*at(50), source="Near", count=3)
+        street = bikes.Bike(*at(80), source="street")
+        far = bikes.Bike(*at(900), source="street")
+        self.assertEqual(bikes.count_within([station, street, far], *HOME, 185), 4)
+
+
 class DecideTests(unittest.TestCase):
-    def test_alerts_once_then_stays_quiet(self):
-        self.assertEqual(main.decide(None, short=True), "short")
-        self.assertIsNone(main.decide("short", short=True))
+    def test_first_check_always_reports(self):
+        for category in ("none", "few", "plenty"):
+            self.assertEqual(main.decide(None, category), "initial")
 
-    def test_announces_recovery(self):
-        self.assertEqual(main.decide("short", short=False), "recovered")
+    def test_same_category_stays_quiet(self):
+        for category in ("none", "few", "plenty"):
+            self.assertIsNone(main.decide(category, category))
 
-    def test_quiet_when_bikes_are_fine(self):
-        self.assertIsNone(main.decide(None, short=False))
-        self.assertIsNone(main.decide("ok", short=False))
+    def test_any_change_reports(self):
+        for before in ("none", "few", "plenty"):
+            for after in ("none", "few", "plenty"):
+                if before != after:
+                    self.assertEqual(main.decide(before, after), "change")
+
+    def test_unknown_old_state_counts_as_first_check(self):
+        self.assertEqual(main.decide("short", "few"), "initial")
 
 
 class RunTests(unittest.TestCase):
-    """The whole check, with the network and notifications replaced."""
+    """The whole check, with the network and notifications replaced.
+
+    With a 3 minute threshold, "nearby" means within about 185 m in a
+    straight line, so bikes at 100 m are nearby and bikes at 400 m are not.
+    """
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.data_dir = Path(self.tmp.name)
         self.sent = []
         patcher = mock.patch.object(
-            main.notify, "send", side_effect=lambda *a, **k: self.sent.append(k["title"])
+            main.notify, "send", side_effect=lambda *a, **k: self.sent.append(k)
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -187,51 +213,82 @@ class RunTests(unittest.TestCase):
 
         return main.run(make_config(**config), self.data_dir, now=now, fetch=fetch)
 
+    def titles(self):
+        return [message["title"] for message in self.sent]
+
+    def log_rows(self):
+        with (self.data_dir / "log.csv").open() as file:
+            return list(csv.DictReader(file))
+
     def test_outside_window_does_nothing(self):
         result = self.check([1000], pdx(2026, 10, 26, 9, 0))
         self.assertEqual(result, "skipped")
         self.assertFalse((self.data_dir / "log.csv").exists())
 
-    def test_far_bike_alerts_once_then_recovers(self):
-        # 3 min threshold = 240 m walking = about 185 m straight line.
+    def test_first_check_reports_plenty(self):
+        self.check([50, 60, 70, 80, 90], pdx(2026, 10, 26, 14, 0))
+        self.assertEqual(self.titles(), ["Plenty of bikes available"])
+        self.assertEqual(self.sent[0]["priority"], "default")
+
+    def test_first_check_reports_few(self):
+        self.check([100, 120, 900], pdx(2026, 10, 26, 14, 0))
+        self.assertEqual(self.titles(), ["Only 2 bikes nearby"])
+
+    def test_first_check_reports_none_urgently(self):
         self.check([400], pdx(2026, 10, 26, 14, 0))
-        self.check([400], pdx(2026, 10, 26, 14, 5))
-        self.check([100], pdx(2026, 10, 26, 14, 10))
+        self.assertEqual(self.titles(), ["No bikes available"])
+        self.assertEqual(self.sent[0]["priority"], "high")
+
+    def test_only_changes_after_first_check(self):
+        self.check([400], pdx(2026, 10, 26, 14, 0))              # none
+        self.check([400], pdx(2026, 10, 26, 14, 5))              # none again
+        self.check([100], pdx(2026, 10, 26, 14, 10))             # few
+        self.check([100, 110], pdx(2026, 10, 26, 14, 15))        # still few
+        self.check([50, 60, 70, 80], pdx(2026, 10, 26, 14, 20))  # plenty
+        self.check([50, 60, 70, 80, 90], pdx(2026, 10, 26, 14, 25))  # plenty
+        self.check([100], pdx(2026, 10, 26, 14, 30))             # few
 
         self.assertEqual(
-            self.sent,
-            ["Biketown: bikes are far today", "Biketown: bikes are back"],
+            self.titles(),
+            [
+                "No bikes available",
+                "Update: only 1 bike nearby",
+                "Update: plenty of bikes available",
+                "Update: only 1 bike nearby",
+            ],
+        )
+        self.assertEqual(
+            [row["status"] for row in self.log_rows()],
+            ["none", "none", "few", "few", "plenty", "plenty", "few"],
         )
 
-        with (self.data_dir / "log.csv").open() as file:
-            rows = list(csv.DictReader(file))
-
-        self.assertEqual([row["status"] for row in rows], ["short", "short", "ok"])
-        self.assertEqual(rows[2]["ebikes_within_threshold"], "1")
-
-    def test_close_bike_sends_nothing(self):
-        self.check([100], pdx(2026, 10, 26, 14, 0))
-        self.assertEqual(self.sent, [])
-
-    def test_no_bikes_counts_as_short(self):
+    def test_no_bikes_at_all(self):
         self.check([], pdx(2026, 10, 26, 14, 0))
-        self.assertEqual(self.sent, ["Biketown: bikes are far today"])
+        self.assertEqual(self.titles(), ["No bikes available"])
+        self.assertIn("No e-bikes are available anywhere", self.sent_body(0))
+
+    def sent_body(self, index):
+        return main.notify.send.call_args_list[index].args[2]
 
     def test_forced_check_outside_window_sends_test(self):
         self.check([100], pdx(2026, 10, 26, 9, 0), force=True)
-        self.assertEqual(self.sent, ["Biketown alert: test check"])
+        self.assertEqual(self.titles(), ["Test check: only 1 bike nearby"])
 
-    def test_new_shift_alerts_again(self):
+    def test_new_shift_reports_again(self):
         self.check([400], pdx(2026, 10, 26, 14, 0))
         self.check([400], pdx(2026, 11, 2, 14, 0))
         self.assertEqual(len(self.sent), 2)
+
+    def test_leave_time_only_mentioned_when_short(self):
+        self.check([400], pdx(2026, 10, 26, 14, 0))
+        self.assertIn("Planned leave time: 2:40 PM", self.sent_body(0))
 
     def test_log_has_no_coordinates(self):
         self.check([400], pdx(2026, 10, 26, 14, 0))
         text = (self.data_dir / "log.csv").read_text()
         self.assertNotIn(f"{HOME[0]:.3f}", text)
         state = json.loads((self.data_dir / "state.json").read_text())
-        self.assertEqual(list(state.values()), ["short"])
+        self.assertEqual(list(state.values()), ["none"])
 
 
 if __name__ == "__main__":

@@ -29,6 +29,10 @@ class Bike:
     # "street" for a free-floating bike, or the station's name.
     source: str
 
+    # How many e-bikes are at this spot: 1 on the street, or however many
+    # are docked at a station.
+    count: int = 1
+
 
 def fetch_json(url: str) -> dict:
     request = urllib.request.Request(
@@ -76,7 +80,8 @@ def street_ebikes(free_bike_status: dict) -> list[Bike]:
 
 
 def docked_ebikes(station_information: dict, station_status: dict) -> list[Bike]:
-    """One entry per station that has at least one rentable e-bike."""
+    """One entry per station that has at least one rentable e-bike,
+    carrying how many e-bikes are docked there."""
 
     locations = {
         station["station_id"]: station
@@ -89,7 +94,9 @@ def docked_ebikes(station_information: dict, station_status: dict) -> list[Bike]
         if not status.get("is_renting") or not status.get("is_installed"):
             continue
 
-        if status.get("num_ebikes_available", 0) <= 0:
+        available = status.get("num_ebikes_available", 0)
+
+        if available <= 0:
             continue
 
         station = locations.get(status["station_id"])
@@ -98,7 +105,12 @@ def docked_ebikes(station_information: dict, station_status: dict) -> list[Bike]
             continue
 
         bikes.append(
-            Bike(lat=station["lat"], lon=station["lon"], source=station["name"])
+            Bike(
+                lat=station["lat"],
+                lon=station["lon"],
+                source=station["name"],
+                count=available,
+            )
         )
 
     return bikes
@@ -119,8 +131,12 @@ def nearest(bikes: list[Bike], lat: float, lon: float) -> tuple[Bike, float] | N
 
 
 def count_within(bikes: list[Bike], lat: float, lon: float, meters: float) -> int:
+    """Total e-bikes within a straight-line radius, counting every docked bike."""
+
     return sum(
-        1 for bike in bikes if distance_meters(lat, lon, bike.lat, bike.lon) <= meters
+        bike.count
+        for bike in bikes
+        if distance_meters(lat, lon, bike.lat, bike.lon) <= meters
     )
 
 

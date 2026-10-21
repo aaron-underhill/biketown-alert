@@ -23,8 +23,11 @@ class Config:
     home_lat: float
     home_lon: float
 
-    # Alert when the nearest e-bike is more than this many minutes' walk.
+    # Bikes within this many minutes' walk count as "nearby".
     threshold_minutes: float
+
+    # Nearby e-bikes needed for "plenty". Fewer (but at least one) is "few".
+    plenty_min: int
 
     # How long before a shift starts you leave home.
     commute_minutes: int
@@ -68,6 +71,7 @@ def load_config() -> Config:
         home_lat=float(_required("HOME_LAT")),
         home_lon=float(_required("HOME_LON")),
         threshold_minutes=float(_optional("THRESHOLD_MINUTES", "3")),
+        plenty_min=int(_optional("PLENTY_MIN", "4")),
         commute_minutes=int(_optional("COMMUTE_MINUTES", "10")),
         lead_minutes=int(_optional("LEAD_MINUTES", "50")),
         walk_meters_per_minute=float(_optional("WALK_METERS_PER_MINUTE", "80")),

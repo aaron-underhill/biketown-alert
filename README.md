@@ -11,9 +11,9 @@ flowchart LR
     A[GitHub Actions<br/>every 5 minutes] --> B{Inside a<br/>pre-shift window?}
     B -->|no| Z[Exit]
     B -->|yes| C[Fetch Biketown<br/>GBFS feeds]
-    C --> D[Nearest available e-bike<br/>street + docked]
-    D --> E{Walk > threshold?}
-    E --> F[Notify only on change<br/>short / back to normal]
+    C --> D[Count e-bikes within<br/>a 3 min walk]
+    D --> E{Category<br/>none / few / plenty}
+    E --> F[Notify on first check<br/>and on any change]
     F --> G[(Append to log.csv<br/>on data branch)]
 ```
 
@@ -21,8 +21,16 @@ flowchart LR
 2. **Live data.** Biketown publishes real-time availability through [GBFS](https://github.com/MobilityData/gbfs), the open bikeshare data standard. Free-floating bikes come with their own coordinates; bikes docked at stations are matched to station locations.
 3. **Filtering.** Reserved bikes, disabled bikes, and scooters are skipped.
 4. **Walking time.** Straight-line distance (haversine formula) times a 1.3 detour factor for city streets, at a walking pace of 80 m per minute.
-5. **Notifications** through [ntfy](https://ntfy.sh). To avoid buzzing every 5 minutes, it only notifies when the situation *changes*: once when bikes become scarce, and once if they come back before I leave. Tapping the notification opens walking directions to the nearest bike.
-6. **Logging.** Every check during a window is appended to `log.csv` on a separate `data` branch, along with the alert state, so the main branch history stays clean.
+5. **Categories.** E-bikes within a 3 minute walk (counting every bike docked at a station) are sorted into one of three categories:
+
+   | Category | Nearby e-bikes | Notification |
+   |---|---|---|
+   | 🟢 Plenty | 4 or more | "Plenty of bikes available" |
+   | 🟡 Few | 1 to 3 | "Only 2 bikes nearby", with the nearest bike's walk time |
+   | 🔴 None | 0 | "No bikes available", high priority |
+
+6. **Notifications** through [ntfy](https://ntfy.sh). The first check of each window always reports the category, so I get a heads-up about an hour before work either way. After that, it only notifies when the category *changes*, in any direction, so it never repeats itself every 5 minutes. Tapping a notification opens walking directions to the nearest bike.
+7. **Logging.** Every check during a window is appended to `log.csv` on a separate `data` branch, along with the alert state, so the main branch history stays clean.
 
 ## Privacy
 
@@ -50,7 +58,8 @@ The repo is public, but nothing personal is in it:
 
    | Variable | Default | Meaning |
    |---|---|---|
-   | `THRESHOLD_MINUTES` | `3` | Alert when the nearest e-bike is a longer walk than this |
+   | `THRESHOLD_MINUTES` | `3` | E-bikes within this many minutes' walk count as nearby |
+| `PLENTY_MIN` | `4` | Nearby e-bikes needed for "plenty" |
    | `COMMUTE_MINUTES` | `10` | How long before a shift starts I leave home |
    | `LEAD_MINUTES` | `50` | How long before leaving the checks begin |
 
