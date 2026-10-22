@@ -32,6 +32,10 @@ flowchart LR
 6. **Notifications** through [ntfy](https://ntfy.sh). The first check of each window always reports the category, so I get a heads-up about an hour before work either way. After that, it only notifies when the category *changes*, in any direction, so it never repeats itself every 5 minutes. Tapping a notification opens walking directions to the nearest bike.
 7. **Logging.** Every check during a window is appended to `log.csv` on a separate `data` branch, along with the alert state, so the main branch history stays clean.
 
+## Data collection for prediction
+
+A second workflow, **Collect bike data**, runs every 15 minutes all day and appends one row to `availability.csv` on the `data` branch: the day and time, how many e-bikes are within a 3, 5, and 10 minute walk of home, the walk to the nearest one, and how many are available citywide. After a few weeks, this becomes the training data for a model that predicts whether a bike will be nearby at a given time.
+
 ## Privacy
 
 The repo is public, but nothing personal is in it:
@@ -87,9 +91,11 @@ bikealert/
   shifts.py   shift schedule parsing and pre-shift check windows
   notify.py   ntfy push notifications
   main.py     one check: decide, notify on change, log
+  collect.py  all-day availability snapshots for the prediction dataset
 tests/        unit tests with hand-made feeds shaped like the real ones
 .github/workflows/
   check.yml   the 5-minute schedule
+  collect.yml every 15 minutes, all day, for the dataset
   tests.yml   runs the tests on every push
 ```
 

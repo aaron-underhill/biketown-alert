@@ -1,0 +1,61 @@
+name: Collect bike data
+
+on:
+  schedule:
+    # Every 15 minutes, all day. Builds the dataset for predicting
+    # bike availability. GitHub may run these a few minutes late.
+    - cron: "*/15 * * * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Shares a group with "Check bikes" so the two never write the data
+# branch at the same time.
+concurrency:
+  group: bike-check
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check out data branch
+        run: |
+          if git ls-remote --exit-code --heads origin data > /dev/null; then
+            git fetch --depth=1 origin data
+            git worktree add -B data data FETCH_HEAD
+          else
+            git worktree add --detach data
+            cd data
+            git checkout --orphan data
+            git rm -rfq .
+          fi
+
+      - name: Collect
+        env:
+          HOME_LAT: ${{ secrets.HOME_LAT }}
+          HOME_LON: ${{ secrets.HOME_LON }}
+        run: python -m bikealert.collect --data-dir data
+
+      - name: Save data
+        run: |
+          cd data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing new to save."
+          else
+            git commit -qm "Collect bike availability"
+            git push -q origin data
+          fi
