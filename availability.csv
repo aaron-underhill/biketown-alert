@@ -1,3 +1,4 @@
 collected_at,weekday,hour,minute,nearest_walk_minutes,ebikes_within_3_min,ebikes_within_5_min,ebikes_within_10_min,nearest_source,city_street_ebikes,city_docked_ebikes
 2026-10-22T10:14:34-07:00,Thu,10,14,1.8,1,2,16,station,357,488
 2026-10-22T13:36:52-07:00,Thu,13,36,0.6,2,3,17,street,352,499
+2026-10-22T16:38:25-07:00,Thu,16,38,1.8,2,3,11,station,347,489
