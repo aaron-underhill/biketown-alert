@@ -69,3 +69,4 @@ collected_at,weekday,hour,minute,nearest_walk_minutes,ebikes_within_3_min,ebikes
 2026-11-05T00:26:54-08:00,Thu,0,26,3.2,0,3,13,street,318,388
 2026-11-05T08:43:51-08:00,Thu,8,43,1.8,2,6,14,station,319,411
 2026-11-05T14:23:52-08:00,Thu,14,23,1.5,2,3,9,street,343,408
+2026-11-05T18:44:57-08:00,Thu,18,44,3.6,0,3,12,street,356,412
